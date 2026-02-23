@@ -54,7 +54,12 @@ Stations are loaded from **`stations.txt`** at startup. The file must contain a 
 
 ## Project structure
 
-- **`src/index.ts`** – Bot entry point (commands, voice, buttons)
+- **`src/index.ts`** – Entry point: Discord client, event wiring (message + interaction), ready handler, login
+- **`src/commands.ts`** – Text command parsing and handlers: `!help`, `!stations`, `!play`, `!stop`
+- **`src/interactions.ts`** – Button handlers: station play buttons and stations list prev/next pagination
+- **`src/voice.ts`** – Voice connection and audio: player, stream resource, join/leave, disconnect handling
+- **`src/stationsUI.ts`** – Station list UI: paginated content and button rows (Previous/Next, play-by-number)
+- **`src/constants.ts`** – Shared constants (station IDs, page size, help text)
 - **`src/radioList.ts`** – Loads and parses `stations.txt`, finds station by number/name/hashtag
 - **`stations.txt`** – Station list (data-stations JSON)
 - **`dist/`** – Compiled JavaScript (created by `npm run build`)
