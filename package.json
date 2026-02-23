@@ -1,7 +1,7 @@
 {
   "name": "discord-radio-bot",
   "version": "1.0.0",
-  "description": "Discord bot that joins voice and plays BestFM radio stream",
+  "description": "Discord bot that joins voice and plays live radio from a configurable list of stations (many genres and regions)",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -9,7 +9,7 @@
     "start": "node dist/index.js",
     "dev": "tsc && node dist/index.js"
   },
-  "keywords": ["discord", "radio", "bot", "voice"],
+  "keywords": ["discord", "radio", "bot", "voice", "stations", "stream"],
   "license": "MIT",
   "dependencies": {
     "@discordjs/voice": "^0.19.0",

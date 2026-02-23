@@ -1,11 +1,11 @@
 # Discord Radio Bot
 
-A Discord bot that joins a voice channel and plays the **BestFM** live stream from `https://live.radio.si/BestFM`. Written in **TypeScript** with full type safety.
+A Discord bot that joins a voice channel and plays **live radio** from a configurable list of many stations. Browse stations by name or hashtag, use paginated lists with buttons, and play by number, name, or hashtag. Written in **TypeScript** with full type safety.
 
 ## Requirements
 
 - **Node.js** 18 or newer
-- **FFmpeg** installed and on your PATH (used to decode the stream and send Opus to Discord)
+- **FFmpeg** installed and on your PATH (used to decode streams and send Opus to Discord)
 
 ## Setup
 
@@ -28,8 +28,10 @@ A Discord bot that joins a voice channel and plays the **BestFM** live stream fr
 
 ## Usage
 
-- **`!play`** – Bot joins your current voice channel and starts playing BestFM.
+- **`!stations [page]`** – Lists all available radio stations (20 per page). Use a page number to jump (e.g. `!stations 2`). Use the **Previous** / **Next** buttons to browse. Each page has **▶** buttons to play a station by its number.
+- **`!play <number | name | hashtag>`** – Bot joins your current voice channel and plays the chosen station. You must be in a voice channel first. Examples: `!play 1`, `!play BestFM`, `!play #bestfm`.
 - **`!stop`** – Bot stops playback and leaves the voice channel.
+- **`!help`** – Shows command help.
 
 ## Run
 
@@ -46,9 +48,15 @@ npm run dev
 
 Make sure FFmpeg is installed (`ffmpeg -version` works in your terminal).
 
+## Station list
+
+Stations are loaded from **`stations.txt`** at startup. The file must contain a single line with a `data-stations="..."` attribute whose value is HTML-entity-encoded JSON: an array of objects with at least `name` and `stream_url`. Optional fields include `hashtag`, `website_url`, `type`, `region`, `city`, `logo`, `frequencies`. Stations are sorted alphabetically by name. The bot exits on startup if the file is missing or invalid.
+
 ## Project structure
 
-- **`src/index.ts`** – Bot entry point (TypeScript source)
+- **`src/index.ts`** – Bot entry point (commands, voice, buttons)
+- **`src/radioList.ts`** – Loads and parses `stations.txt`, finds station by number/name/hashtag
+- **`stations.txt`** – Station list (data-stations JSON)
 - **`dist/`** – Compiled JavaScript (created by `npm run build`)
 - **`tsconfig.json`** – TypeScript configuration (strict mode, ESM)
 
