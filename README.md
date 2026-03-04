@@ -5,7 +5,7 @@ A Discord bot that joins a voice channel and plays **live radio** from a configu
 ## Requirements
 
 - **Node.js** 18 or newer
-- **FFmpeg** installed and on your PATH (used to decode streams and send Opus to Discord)
+- **FFmpeg** is provided by the `ffmpeg-static` dependency (no separate installation needed; used to decode streams and send Opus to Discord)
 
 ## Setup
 
@@ -45,8 +45,6 @@ npm start
 ```bash
 npm run dev
 ```
-
-Make sure FFmpeg is installed (`ffmpeg -version` works in your terminal).
 
 ## Station list
 
