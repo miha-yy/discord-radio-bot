@@ -102,20 +102,44 @@ export async function joinVoiceAndPlayStation(
     currentConnection = null;
   }
 
-  const connection = joinVoiceChannel({
+  let connection = joinVoiceChannel({
     channelId: voiceChannel.id,
     guildId: guild.id,
     adapterCreator: guild.voiceAdapterCreator,
-    daveEncryption: false,
+    daveEncryption: true,
   });
 
   currentConnection = connection;
 
-  try {
-    await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
-  } catch (err) {
-    const error = err instanceof Error ? err : new Error(String(err));
-    console.error('Voice connection failed:', error.message);
+  const readyTimeoutMs = 25_000;
+  const maxAttempts = 2;
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await entersState(connection, VoiceConnectionStatus.Ready, readyTimeoutMs);
+      lastError = null;
+      break;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      console.error(`Voice connection failed (attempt ${attempt}/${maxAttempts}):`, lastError.message);
+      if (attempt < maxAttempts) {
+        connection.destroy();
+        currentConnection = null;
+        await new Promise((r) => setTimeout(r, 1500));
+        connection = joinVoiceChannel({
+          channelId: voiceChannel.id,
+          guildId: guild.id,
+          adapterCreator: guild.voiceAdapterCreator,
+          daveEncryption: true,
+        });
+        currentConnection = connection;
+      }
+    }
+  }
+
+  if (lastError) {
+    console.error('Voice connection failed:', lastError.message);
     connection.destroy();
     currentConnection = null;
     return { success: false, error: 'Failed to join the voice channel. Try again.' };
