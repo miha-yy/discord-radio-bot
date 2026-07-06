@@ -4,7 +4,7 @@ import { getCommand, handleHelp, handleStations, handlePlay, handleStop } from '
 import { getStationsButtonType, handleStationsPlayButton, handleStationsPagination } from './interactions.js';
 import { loadStations } from './radioList.js';
 import { STATIONS_PLAY_PREFIX } from './constants.js';
-import './voice.js';
+import { updateAloneState } from './voice.js';
 
 const client = new Client({
   intents: [
@@ -83,6 +83,13 @@ client.on('interactionCreate', async (interaction) => {
     default:
       break;
   }
+});
+
+client.on('voiceStateUpdate', (oldState, newState) => {
+  // Any join/leave/move in a guild where we're playing may change whether the
+  // bot is alone in its channel; re-evaluate the idle-disconnect timer.
+  const guild = newState.guild ?? oldState.guild;
+  if (guild) updateAloneState(guild);
 });
 
 client.once('clientReady', async () => {

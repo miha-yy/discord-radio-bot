@@ -5,7 +5,7 @@ import {
   buildStationsPaginationRow,
   buildStationsPlayRows,
 } from './stationsUI.js';
-import { getCurrentConnection, joinVoiceAndPlayStation, stopAndLeave } from './voice.js';
+import { joinVoiceAndPlayStation, stopAndLeave } from './voice.js';
 import { HELP_TEXT } from './constants.js';
 
 export function getCommand(commandStr: string): 'help' | 'stations' | 'play' | 'stop' | null {
@@ -87,11 +87,10 @@ export async function handlePlay(message: Message, content: string, guild: Guild
 export async function handleStop(message: Message, guild: Guild): Promise<void> {
   logCommand('!stop', guild, message.channel.id, message.author.tag);
 
-  if (!getCurrentConnection()) {
-    await message.reply('I am not in a voice channel.');
+  if (!stopAndLeave(guild.id)) {
+    await message.reply('I am not in a voice channel on this server.');
     return;
   }
 
-  stopAndLeave();
   await message.reply('Stopped and left the voice channel.');
 }

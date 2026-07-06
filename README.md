@@ -2,6 +2,10 @@
 
 A Discord bot that joins a voice channel and plays **live radio** from a configurable list of many stations. Browse stations by name or hashtag, use paginated lists with buttons, and play by number, name, or hashtag. Written in **TypeScript** with full type safety.
 
+The bot keeps an **independent voice session per server**, so a single bot instance can be playing in many servers' voice channels at the same time. Within a single server it stays in one voice channel; running `!play` again there switches the station or channel without affecting playback in other servers, and `!stop` only leaves that server's channel.
+
+To avoid streaming to nobody, the bot **auto-disconnects from a server's voice channel after being alone (no human listeners) for 5 minutes**. The countdown is cancelled if someone (re)joins the channel before it elapses. This is tracked per server, so an idle channel in one server won't affect playback in another.
+
 ## Requirements
 
 - **Node.js** 18 or newer
@@ -55,7 +59,7 @@ Stations are loaded from **`stations.txt`** at startup. The file must contain a 
 - **`src/index.ts`** – Entry point: Discord client, event wiring (message + interaction), ready handler, login
 - **`src/commands.ts`** – Text command parsing and handlers: `!help`, `!stations`, `!play`, `!stop`
 - **`src/interactions.ts`** – Button handlers: station play buttons and stations list prev/next pagination
-- **`src/voice.ts`** – Voice connection and audio: player, stream resource, join/leave, disconnect handling
+- **`src/voice.ts`** – Voice connections and audio: one player + connection **per guild** (keyed by guild ID), stream resource, join/leave, disconnect handling
 - **`src/stationsUI.ts`** – Station list UI: paginated content and button rows (Previous/Next, play-by-number)
 - **`src/constants.ts`** – Shared constants (station IDs, page size, help text)
 - **`src/radioList.ts`** – Loads and parses `stations.txt`, finds station by number/name/hashtag
