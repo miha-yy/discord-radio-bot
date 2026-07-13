@@ -1,4 +1,7 @@
 import { spawn } from 'node:child_process';
+import { readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 /**
  * YouTube playback is resolved through the yt-dlp binary (no fragile npm
@@ -20,6 +23,48 @@ import { spawn } from 'node:child_process';
 const RESOLVE_TIMEOUT_MS = 30_000;
 
 const FALLBACK_CLIENTS = process.env.YTDLP_FALLBACK_CLIENTS ?? 'web_embedded,android_vr,tv';
+
+/**
+ * yt-dlp not only reads --cookies files, it saves rotated cookies back to
+ * them on exit — and crashes (PYI unhandled OSError) when the file is
+ * read-only, which is exactly how Render mounts secret files. So the
+ * YTDLP_COOKIES file is copied once per process to a writable temp file
+ * (normalizing Windows line endings while at it); yt-dlp then reads and
+ * rotates the copy across calls.
+ */
+let preparedCookiesPath: string | null | undefined;
+
+async function prepareCookiesFile(): Promise<string | null> {
+  if (preparedCookiesPath !== undefined) return preparedCookiesPath;
+  const src = process.env.YTDLP_COOKIES;
+  if (!src) {
+    preparedCookiesPath = null;
+    return null;
+  }
+  try {
+    const raw = await readFile(src, 'utf-8');
+    const dest = join(tmpdir(), `radio-bot-cookies-${process.pid}.txt`);
+    await writeFile(dest, raw.replace(/\r\n?/g, '\n'), { encoding: 'utf-8', mode: 0o600 });
+    console.log(`[yt-dlp] Copied cookies from ${src} to writable ${dest}`);
+    preparedCookiesPath = dest;
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    console.error(`[yt-dlp] Cannot read YTDLP_COOKIES file (${src}): ${error.message} — continuing without cookies`);
+    preparedCookiesPath = null;
+  }
+  return preparedCookiesPath;
+}
+
+/**
+ * yt-dlp needs a JavaScript runtime to solve YouTube's "n" challenge but only
+ * enables deno by default; we are a Node app, so hand it the exact node
+ * binary we are running on. Override with YTDLP_JS_RUNTIMES (`off` disables).
+ */
+function jsRuntimesArg(): string | null {
+  const env = process.env.YTDLP_JS_RUNTIMES;
+  if (env === 'off') return null;
+  return env ?? `node:${process.execPath}`;
+}
 
 export interface YouTubeTrack {
   title: string;
@@ -103,7 +148,7 @@ function runYtDlp(args: string[]): Promise<YtDlpRun> {
   });
 }
 
-function buildArgs(target: string, extractorArgs?: string): string[] {
+function buildArgs(target: string, cookiesPath: string | null, extractorArgs?: string): string[] {
   const args = [
     '--no-playlist',
     '--no-warnings',
@@ -113,8 +158,12 @@ function buildArgs(target: string, extractorArgs?: string): string[] {
     '--print', 'webpage_url',
     '--print', 'urls',
   ];
-  if (process.env.YTDLP_COOKIES) {
-    args.push('--cookies', process.env.YTDLP_COOKIES);
+  const jsRuntimes = jsRuntimesArg();
+  if (jsRuntimes) {
+    args.push('--js-runtimes', jsRuntimes);
+  }
+  if (cookiesPath) {
+    args.push('--cookies', cookiesPath);
   }
   if (extractorArgs) {
     args.push('--extractor-args', extractorArgs);
@@ -163,19 +212,21 @@ export async function resolveYouTube(input: string): Promise<YouTubeResolveResul
   if (!query) return { success: false, error: 'Give me a YouTube link or a search query.' };
 
   const target = looksLikeUrl(query) ? query : `ytsearch1:${query}`;
+  const cookiesPath = await prepareCookiesFile();
 
-  const first = await runYtDlp(buildArgs(target, process.env.YTDLP_EXTRACTOR_ARGS));
+  const first = await runYtDlp(buildArgs(target, cookiesPath, process.env.YTDLP_EXTRACTOR_ARGS));
   if (first.fatalError) return { success: false, error: first.fatalError };
   if (first.ok) return parseOutput(first.stdout, query);
+  console.error(`[yt-dlp] Failed (stderr tail): ${first.stderr.trim().slice(-800)}`);
 
   // YouTube's datacenter-IP bot check: retry once with player clients that
   // currently don't require a PO token and usually bypass the challenge.
   if (isBotCheckError(first.stderr)) {
     console.warn(`[yt-dlp] Bot check hit — retrying with player_client=${FALLBACK_CLIENTS}`);
-    const retry = await runYtDlp(buildArgs(target, `youtube:player_client=${FALLBACK_CLIENTS}`));
+    const retry = await runYtDlp(buildArgs(target, cookiesPath, `youtube:player_client=${FALLBACK_CLIENTS}`));
     if (retry.fatalError) return { success: false, error: retry.fatalError };
     if (retry.ok) return parseOutput(retry.stdout, query);
-    console.error(`[yt-dlp] Fallback clients also failed: ${lastErrorLine(retry.stderr) ?? 'unknown error'}`);
+    console.error(`[yt-dlp] Fallback clients also failed (stderr tail): ${retry.stderr.trim().slice(-800)}`);
     return {
       success: false,
       error:
@@ -185,9 +236,11 @@ export async function resolveYouTube(input: string): Promise<YouTubeResolveResul
     };
   }
 
+  // The PyInstaller binary reports internal crashes as "[PYI-n:ERROR]", which
+  // is meaningless to users — the real traceback was logged above.
   const errorLine = lastErrorLine(first.stderr);
-  return {
-    success: false,
-    error: errorLine ? `YouTube: ${errorLine.slice(0, 300)}` : 'yt-dlp failed.',
-  };
+  if (!errorLine || /PYI-\d+:ERROR/.test(errorLine)) {
+    return { success: false, error: 'yt-dlp crashed unexpectedly — check the server logs for the traceback.' };
+  }
+  return { success: false, error: `YouTube: ${errorLine.slice(0, 300)}` };
 }
