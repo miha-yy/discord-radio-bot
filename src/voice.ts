@@ -97,6 +97,10 @@ function createStreamResource(guildId: string, streamUrl: string) {
       '-user_agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
       '-i', streamUrl,
       '-acodec', 'libopus',
+      // Cheapest encoder setting: essential on tiny cloud instances (e.g.
+      // Render free tier's 0.1 vCPU) where the default (10) can't keep up
+      // with real time, starving the player until it idles out.
+      '-compression_level', '0',
       '-f', 'opus',
       '-ar', '48000',
       '-ac', '2',
