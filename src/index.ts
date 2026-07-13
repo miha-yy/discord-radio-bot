@@ -5,6 +5,7 @@ import { getStationsButtonType, handleStationsPlayButton, handleStationsPaginati
 import { loadStations } from './radioList.js';
 import { STATIONS_PLAY_PREFIX } from './constants.js';
 import { updateAloneState } from './voice.js';
+import { startHealthServer } from './server.js';
 
 const client = new Client({
   intents: [
@@ -111,6 +112,10 @@ if (!token) {
   console.error('Missing DISCORD_TOKEN. Set it in .env or environment.');
   process.exit(1);
 }
+
+// Bind to PORT before logging in so Render's health check passes even while
+// the Discord connection is still being established.
+startHealthServer(() => client.isReady());
 
 client.login(token).catch((err: unknown) => {
   const error = err instanceof Error ? err : new Error(String(err));
