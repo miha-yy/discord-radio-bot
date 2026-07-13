@@ -85,26 +85,30 @@ export function getActiveGuildCount(): number {
   return sessions.size;
 }
 
+export function buildFfmpegArgs(streamUrl: string): string[] {
+  return [
+    '-reconnect', '1',
+    '-reconnect_streamed', '1',
+    '-reconnect_delay_max', '5',
+    '-analyzeduration', '0',
+    '-loglevel', 'error',
+    // Some stations reject ffmpeg's default "Lavf/..." user agent.
+    '-user_agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+    '-i', streamUrl,
+    '-acodec', 'libopus',
+    // Cheapest encoder setting: essential on tiny cloud instances (e.g.
+    // Render free tier's 0.1 vCPU) where the default (10) can't keep up
+    // with real time, starving the player until it idles out.
+    '-compression_level', '0',
+    '-f', 'opus',
+    '-ar', '48000',
+    '-ac', '2',
+  ];
+}
+
 function createStreamResource(guildId: string, streamUrl: string) {
   const ffmpeg = new prism.FFmpeg({
-    args: [
-      '-reconnect', '1',
-      '-reconnect_streamed', '1',
-      '-reconnect_delay_max', '5',
-      '-analyzeduration', '0',
-      '-loglevel', 'error',
-      // Some stations reject ffmpeg's default "Lavf/..." user agent.
-      '-user_agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
-      '-i', streamUrl,
-      '-acodec', 'libopus',
-      // Cheapest encoder setting: essential on tiny cloud instances (e.g.
-      // Render free tier's 0.1 vCPU) where the default (10) can't keep up
-      // with real time, starving the player until it idles out.
-      '-compression_level', '0',
-      '-f', 'opus',
-      '-ar', '48000',
-      '-ac', '2',
-    ],
+    args: buildFfmpegArgs(streamUrl),
   });
 
   // Surface FFmpeg's own errors (HTTP 403, geo-blocks, TLS failures, …) in the

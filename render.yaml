@@ -1,13 +1,11 @@
 services:
   - type: web
     name: discord-radio-bot
-    runtime: node
+    runtime: docker
     plan: free
-    # EU region: many of the listed radio streams are European and may
-    # geo-block US IPs (Render's default region is Oregon).
+    # EU region: closer to the (mostly European) radio streams and Discord
+    # voice servers. Render's default region is Oregon, US.
     region: frankfurt
-    buildCommand: npm ci --include=dev && npm run build
-    startCommand: npm start
     healthCheckPath: /healthz
     envVars:
       - key: DISCORD_TOKEN

@@ -1,6 +1,7 @@
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { getActiveGuildCount } from './voice.js';
+import prism from 'prism-media';
+import { getActiveGuildCount, buildFfmpegArgs } from './voice.js';
 import { loadStations } from './radioList.js';
 
 const PROBE_UA =
@@ -62,6 +63,60 @@ async function probeStream(url: string) {
   }
 }
 
+/**
+ * Run the bot's actual FFmpeg transcode pipeline against a stream for ~3
+ * seconds and report what happened. This exercises the exact code path
+ * !play uses (same binary, same args), so a crash here reproduces a
+ * playback failure without needing Discord.
+ */
+async function probeFfmpeg(url: string): Promise<Record<string, unknown>> {
+  let ffmpegInfo: { command?: string; version?: string } = {};
+  try {
+    ffmpegInfo = prism.FFmpeg.getInfo();
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    return { error: `FFmpeg not found: ${error.message}` };
+  }
+
+  return await new Promise<Record<string, unknown>>((resolve) => {
+    let bytesOut = 0;
+    let stderr = '';
+    let settled = false;
+    const ffmpeg = new prism.FFmpeg({
+      // '-t 3': transcode 3 seconds of output, then exit cleanly (code 0).
+      args: [...buildFfmpegArgs(url), '-t', '3'],
+    });
+    const finish = (extra: Record<string, unknown>) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({
+        ffmpegCommand: ffmpegInfo.command,
+        ffmpegVersion: ffmpegInfo.version,
+        bytesOut,
+        stderr: stderr.trim().slice(0, 2000) || null,
+        ...extra,
+      });
+    };
+    const timer = setTimeout(() => {
+      ffmpeg.destroy();
+      finish({ error: 'timed out after 15s' });
+    }, 15_000);
+
+    ffmpeg.on('data', (chunk: Buffer) => {
+      bytesOut += chunk.length;
+    });
+    ffmpeg.on('error', () => {});
+    ffmpeg.process.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    ffmpeg.process.on('close', (code, signal) => {
+      // ok = produced audio and exited cleanly after its 3s of output.
+      finish({ ok: code === 0 && bytesOut > 0, exitCode: code, signal });
+    });
+  });
+}
+
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
   res.writeHead(statusCode, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body, null, 2));
@@ -88,18 +143,22 @@ export function startHealthServer(isDiscordReady: () => boolean): http.Server {
       return;
     }
 
-    // e.g. GET /debug/stream/26 — probe station #26's stream URL from the
-    // host's network to check reachability/geo-blocks.
-    const debugMatch = url.match(/^\/debug\/stream\/(\d+)$/);
+    // GET /debug/stream/26 — fetch station #26's stream URL from the host's
+    // network (reachability/geo-blocks). GET /debug/ffmpeg/26 — additionally
+    // run it through the real FFmpeg transcode pipeline.
+    const debugMatch = url.match(/^\/debug\/(stream|ffmpeg)\/(\d+)$/);
     if (debugMatch) {
       const stations = await loadStations();
-      const index = parseInt(debugMatch[1], 10);
+      const index = parseInt(debugMatch[2], 10);
       const station = index >= 1 && index <= stations.length ? stations[index - 1] : undefined;
       if (!station) {
         sendJson(res, 404, { error: `No station #${index} (1-${stations.length})` });
         return;
       }
-      const probe = await probeStream(station.stream_url);
+      const probe =
+        debugMatch[1] === 'ffmpeg'
+          ? await probeFfmpeg(station.stream_url)
+          : await probeStream(station.stream_url);
       sendJson(res, 200, { station: station.name, url: station.stream_url, ...probe });
       return;
     }

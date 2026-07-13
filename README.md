@@ -9,7 +9,7 @@ To avoid streaming to nobody, the bot **auto-disconnects from a server's voice c
 ## Requirements
 
 - **Node.js** 18 or newer
-- **FFmpeg** is provided by the `ffmpeg-static` dependency (no separate installation needed; used to decode streams and send Opus to Discord)
+- **FFmpeg** – for local development it is provided by the `ffmpeg-static` devDependency (no separate installation needed). In the production Docker image the distro FFmpeg is installed instead, because static FFmpeg builds can segfault in container environments.
 
 ## Setup
 
@@ -52,14 +52,18 @@ npm run dev
 
 ## Deploy on Render
 
-The repo includes a **`render.yaml`** blueprint that deploys the bot as a **Web Service** (Render's free tier only offers web services, so the bot exposes a small HTTP health endpoint to satisfy Render's port binding and health checks).
+The repo includes a **`render.yaml`** blueprint that deploys the bot as a **Docker web service** in the Frankfurt region (Render's free tier only offers web services, so the bot exposes a small HTTP health endpoint to satisfy Render's port binding and health checks).
 
 1. Push the repo to GitHub/GitLab.
-2. In the [Render dashboard](https://dashboard.render.com), choose **New → Blueprint** and select the repo — Render reads `render.yaml` automatically. (Alternatively create a **Web Service** manually with build command `npm ci --include=dev && npm run build` and start command `npm start`.)
+2. In the [Render dashboard](https://dashboard.render.com), choose **New → Blueprint** and select the repo — Render reads `render.yaml` automatically. (Note: a service's runtime and region are fixed at creation — to switch an existing service to Docker/Frankfurt you must delete and recreate it.)
 3. When prompted, set the **`DISCORD_TOKEN`** environment variable to your bot token (it is marked `sync: false`, so it is never committed).
 4. Deploy. The service is healthy once `GET /healthz` returns `200` — it reports Discord connection state and the number of active voice sessions.
 
-**FFmpeg:** nothing to install — the `ffmpeg-static` npm dependency downloads a Linux FFmpeg binary during `npm install` on Render, and `prism-media` picks it up automatically.
+**FFmpeg:** the Docker image installs Debian's FFmpeg (`apt-get install ffmpeg`). The `ffmpeg-static` npm binary is deliberately **not** used in production — it segfaults on Render's runtime — and is pruned from the image along with the other devDependencies.
+
+**Debug endpoints** (useful when a station won't play in production):
+- `GET /debug/stream/<number>` – fetches the station's stream URL from the server's network and reports HTTP status, content type, and bytes read (detects geo-blocks and dead streams).
+- `GET /debug/ffmpeg/<number>` – runs the station through the bot's real FFmpeg transcode pipeline for 3 seconds and reports the binary used, bytes produced, stderr, and exit code/signal.
 
 **Free-tier caveat:** Render's free web services **spin down after ~15 minutes without inbound HTTP traffic**, which takes the bot offline until the next request wakes it (and drops any live voice sessions). To keep it online 24/7 either:
 - point a free uptime pinger (e.g. [UptimeRobot](https://uptimerobot.com) or [cron-job.org](https://cron-job.org)) at `https://<your-service>.onrender.com/healthz` every 5–10 minutes, or
@@ -75,8 +79,9 @@ Stations are loaded from **`stations.txt`** at startup. The file must contain a 
 - **`src/commands.ts`** – Text command parsing and handlers: `!help`, `!stations`, `!play`, `!stop`
 - **`src/interactions.ts`** – Button handlers: station play buttons and stations list prev/next pagination
 - **`src/voice.ts`** – Voice connections and audio: one player + connection **per guild** (keyed by guild ID), stream resource, join/leave, disconnect handling
-- **`src/server.ts`** – HTTP health endpoint (`/healthz`) for hosting platforms like Render that require port binding and health checks
-- **`render.yaml`** – Render Blueprint for one-click web service deployment
+- **`src/server.ts`** – HTTP health endpoint (`/healthz`) plus stream/FFmpeg debug endpoints, for hosting platforms like Render that require port binding and health checks
+- **`render.yaml`** – Render Blueprint for one-click web service deployment (Docker runtime, Frankfurt region)
+- **`Dockerfile`** – Production image: Node 22 + Debian FFmpeg, builds TypeScript, prunes devDependencies
 - **`src/stationsUI.ts`** – Station list UI: paginated content and button rows (Previous/Next, play-by-number)
 - **`src/constants.ts`** – Shared constants (station IDs, page size, help text)
 - **`src/radioList.ts`** – Loads and parses `stations.txt`, finds station by number/name/hashtag
