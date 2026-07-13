@@ -67,7 +67,7 @@ Every text command has a slash-command twin (`/play`, `/stations`, …) with aut
 | `!stations [filter] [page]` | Paginated station list (20/page) with ▶ buttons. Optional filter, e.g. `!stations rock` or `!stations koroška 2`. ⚠️ marks stations that failed the last health check. |
 | `!search <query>` | Search the local list by name/genre/region — returns up to 15 matches with play buttons. |
 | `!radio <query>` | Search radio-browser.info (~50k worldwide stations); play results with the ▶ buttons. `/radio` autocompletes live from the API. |
-| `!yt <link or search>` | Play YouTube audio — normal videos (bot leaves when the video ends) and livestreams (auto-restarted like radio). |
+| `!yt <link or search>` | Play YouTube audio — normal videos (bot leaves when the video ends) and livestreams (auto-restarted like radio). See [YouTube bot check](#youtube-bot-check) if it fails on a cloud host. |
 
 ### Favorites
 
@@ -95,6 +95,16 @@ Every text command has a slash-command twin (`/play`, `/stations`, …) with aut
 - **Watchdog:** when a live stream drops, the bot restarts it after 2 s / 5 s / 10 s. After 60 s of stable playback the retry budget resets. If all retries fail, the bot posts a warning (with the last FFmpeg error) to the channel that started playback, then leaves.
 - **Health sweep:** every 6 h (configurable via `STATION_HEALTH_INTERVAL_MIN`, `0`/`off` disables) all stations are probed from the host's network; failures show up as ⚠️ in `!stations`/`!search` and on `GET /debug/stations`.
 
+## YouTube bot check
+
+YouTube challenges requests from **datacenter IPs** (Render, AWS, …) with *“Sign in to confirm you're not a bot”*, which is why `!yt` can work sometimes and fail other times on a cloud host. The bot mitigates this in layers:
+
+1. **Automatic retry with exempt player clients.** When the bot check hits, the bot retries once with `--extractor-args "youtube:player_client=web_embedded,android_vr,tv"` — clients that currently don't require a [PO token](https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide) and usually bypass the challenge. Override the list with `YTDLP_FALLBACK_CLIENTS` if YouTube's rules change.
+2. **Cookies (reliable fix).** Export YouTube cookies from a logged-in browser (any “cookies.txt” exporter extension, Netscape format) and point `YTDLP_COOKIES` at the file. On Render: add it as a **Secret File** (e.g. `/etc/secrets/cookies.txt`) and set `YTDLP_COOKIES=/etc/secrets/cookies.txt`. Use a throwaway Google account — automated use can get an account flagged. Cookies are then passed to every yt-dlp call.
+3. **PO token provider (heavy-duty).** If both fail long-term, yt-dlp's recommended server-side fix is the [bgutil-ytdlp-pot-provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider) plugin; that requires switching from the standalone binary to a pip-installed yt-dlp with plugins.
+
+`YTDLP_EXTRACTOR_ARGS` lets you tune the *first* attempt without redeploying (e.g. pin different clients).
+
 ## Persistence
 
 Favorites, last station, volume, DJ role, 24/7 flag, and play stats live in `data/store.json` (override the directory with `DATA_DIR`). **Note:** on Render's free tier the filesystem is ephemeral — the store resets on each deploy/restart. Attach a persistent disk (paid) and point `DATA_DIR` at it, or accept that favorites/stats reset.
@@ -120,6 +130,9 @@ npm run dev
 | `PORT` | Health server port (default 3000; set by Render automatically). |
 | `DATA_DIR` | Directory for `store.json` (default `./data`). |
 | `YTDLP_PATH` | Path to the yt-dlp binary if it's not on PATH. |
+| `YTDLP_COOKIES` | Path to a Netscape-format cookies.txt for YouTube (fixes the datacenter-IP bot check; see above). |
+| `YTDLP_EXTRACTOR_ARGS` | Extra `--extractor-args` for the first yt-dlp attempt. |
+| `YTDLP_FALLBACK_CLIENTS` | Player clients for the bot-check retry (default `web_embedded,android_vr,tv`). |
 | `STATION_HEALTH_INTERVAL_MIN` | Minutes between station health sweeps (default 360; `0`/`off` disables). |
 
 ## Deploy on Render
