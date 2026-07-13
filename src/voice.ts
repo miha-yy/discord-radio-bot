@@ -81,20 +81,34 @@ export function getActiveGuildCount(): number {
   return sessions.size;
 }
 
-function createStreamResource(streamUrl: string) {
+function createStreamResource(guildId: string, streamUrl: string) {
   const ffmpeg = new prism.FFmpeg({
     args: [
       '-reconnect', '1',
       '-reconnect_streamed', '1',
       '-reconnect_delay_max', '5',
       '-analyzeduration', '0',
-      '-loglevel', '0',
+      '-loglevel', 'error',
+      // Some stations reject ffmpeg's default "Lavf/..." user agent.
+      '-user_agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
       '-i', streamUrl,
       '-acodec', 'libopus',
       '-f', 'opus',
       '-ar', '48000',
       '-ac', '2',
     ],
+  });
+
+  // Surface FFmpeg's own errors (HTTP 403, geo-blocks, TLS failures, …) in the
+  // logs; with '-loglevel 0' a dead stream just ended silently.
+  ffmpeg.process.stderr?.on('data', (chunk: Buffer) => {
+    const message = chunk.toString().trim();
+    if (message) console.error(`[${guildId}] [ffmpeg] ${message}`);
+  });
+  ffmpeg.process.on('close', (code) => {
+    if (code !== 0 && code !== null) {
+      console.error(`[${guildId}] [ffmpeg] exited with code ${code} (stream: ${streamUrl})`);
+    }
   });
 
   return createAudioResource(ffmpeg, {
@@ -179,7 +193,7 @@ export async function joinVoiceAndPlayStation(
   }
 
   setupVoiceDisconnectHandler(guild.id, connection);
-  const resource = createStreamResource(station.stream_url);
+  const resource = createStreamResource(guild.id, station.stream_url);
   player.play(resource);
   connection.subscribe(player);
   sessions.set(guild.id, {
