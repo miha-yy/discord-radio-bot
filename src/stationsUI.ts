@@ -13,7 +13,6 @@ import {
   STATIONS_PLAY_PREFIX,
 } from './constants.js';
 import type { RadioStation } from './radioList.js';
-import { isStationUnhealthy } from './health.js';
 
 /** A station plus its 1-based position in the FULL list. Filtered views keep
  * the global number so `!play <number>` and play buttons stay stable. */
@@ -40,8 +39,7 @@ export function filterStations(stations: RadioStation[], filter: string): Statio
 }
 
 export function formatStationLine({ station: s, globalIndex }: StationEntry): string {
-  const marker = isStationUnhealthy(s.name) ? ' ⚠️' : '';
-  return `${globalIndex}. **${s.name}** \`${s.hashtag ?? globalIndex}\`${marker}`;
+  return `${globalIndex}. **${s.name}** \`${s.hashtag ?? globalIndex}\``;
 }
 
 export function buildStationsPageContent(
@@ -54,7 +52,6 @@ export function buildStationsPageContent(
   const start = (safePage - 1) * STATIONS_PER_PAGE;
   const slice = entries.slice(start, start + STATIONS_PER_PAGE);
   const lines = slice.map(formatStationLine);
-  const anyUnhealthy = slice.some(({ station }) => isStationUnhealthy(station.name));
   // The pagination buttons re-derive page and filter from this header line —
   // keep the `matching \`...\`` and `page X/Y` formats in sync with
   // interactions.ts.
@@ -65,8 +62,7 @@ export function buildStationsPageContent(
     header,
     lines.join('\n') || '_No stations match._',
     '',
-    'Use `!play <number>` or `!play <name/hashtag>` to play.' +
-      (anyUnhealthy ? ' ⚠️ = stream was unreachable at the last health check.' : ''),
+    'Use `!play <number>` or `!play <name/hashtag>` to play.',
   ].join('\n');
   return { content, totalPages };
 }

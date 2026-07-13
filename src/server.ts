@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import prism from 'prism-media';
 import { getActiveGuildCount, buildFfmpegArgs } from './voice.js';
 import { loadStations } from './radioList.js';
-import { probeStream, getHealthSummary } from './health.js';
+import { probeStream } from './health.js';
 
 /**
  * Run the bot's actual FFmpeg transcode pipeline against a stream for ~3
@@ -77,22 +77,11 @@ export function startHealthServer(isDiscordReady: () => boolean): http.Server {
     const url = req.url ?? '/';
 
     if (url === '/' || url === '/healthz') {
-      const health = getHealthSummary();
       sendJson(res, 200, {
         status: 'ok',
         discord: isDiscordReady() ? 'connected' : 'connecting',
         activeVoiceSessions: getActiveGuildCount(),
-        stationHealth: {
-          lastSweepAt: health.lastSweepAt ? new Date(health.lastSweepAt).toISOString() : null,
-          unhealthyCount: health.unhealthyCount,
-        },
       });
-      return;
-    }
-
-    // GET /debug/stations — the last health sweep's unreachable stations.
-    if (url === '/debug/stations') {
-      sendJson(res, 200, getHealthSummary());
       return;
     }
 

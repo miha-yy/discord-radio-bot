@@ -17,7 +17,6 @@ The bot keeps an **independent voice session per server**, so a single bot insta
 - **Sleep timer** — `!sleep 45` stops playback after 45 minutes
 - **DJ role** — optionally restrict playback control to one role (`!dj @role`)
 - **24/7 mode** — `!247 on` disables the auto-leave-when-alone timeout
-- **Station health sweep** — all stations are probed periodically; dead/geo-blocked ones get a ⚠️ marker in lists
 - **Stats** — `!top` shows the most played stations with listening hours
 - **Auto-disconnect** — leaves after 5 minutes alone in a channel (unless 24/7 mode is on), tracked per server
 
@@ -64,7 +63,7 @@ Every text command has a slash-command twin (`/play`, `/stations`, …) with aut
 
 | Command | Description |
 |---------|-------------|
-| `!stations [filter] [page]` | Paginated station list (20/page) with ▶ buttons. Optional filter, e.g. `!stations rock` or `!stations koroška 2`. ⚠️ marks stations that failed the last health check. |
+| `!stations [filter] [page]` | Paginated station list (20/page) with ▶ buttons. Optional filter, e.g. `!stations rock` or `!stations koroška 2`. |
 | `!search <query>` | Search the local list by name/genre/region — returns up to 15 matches with play buttons. |
 | `!radio <query>` | Search radio-browser.info (~50k worldwide stations); play results with the ▶ buttons. `/radio` autocompletes live from the API. |
 | `!yt <link or search>` | Play YouTube audio — normal videos (bot leaves when the video ends) and livestreams (auto-restarted like radio). See [YouTube bot check](#youtube-bot-check) if it fails on a cloud host. |
@@ -93,7 +92,6 @@ Every text command has a slash-command twin (`/play`, `/stations`, …) with aut
 ## Reliability behavior
 
 - **Watchdog:** when a live stream drops, the bot restarts it after 2 s / 5 s / 10 s. After 60 s of stable playback the retry budget resets. If all retries fail, the bot posts a warning (with the last FFmpeg error) to the channel that started playback, then leaves.
-- **Health sweep:** every 6 h (configurable via `STATION_HEALTH_INTERVAL_MIN`, `0`/`off` disables) all stations are probed from the host's network; failures show up as ⚠️ in `!stations`/`!search` and on `GET /debug/stations`.
 
 ## YouTube bot check
 
@@ -135,7 +133,6 @@ npm run dev
 | `YTDLP_FALLBACK_CLIENTS` | Player clients for the bot-check retry (default `web_embedded,android_vr,tv`). |
 | `YTDLP_JS_RUNTIMES` | JS runtime for yt-dlp's challenge solver (default: the bot's own node binary; `off` disables). |
 | `YTDLP_TIMEOUT_MS` | Timeout per yt-dlp call (default 90000; slow cloud instances need the headroom). |
-| `STATION_HEALTH_INTERVAL_MIN` | Minutes between station health sweeps (default 360; `0`/`off` disables). |
 
 ## Deploy on Render
 
@@ -144,14 +141,13 @@ The repo includes a **`render.yaml`** blueprint that deploys the bot as a **Dock
 1. Push the repo to GitHub/GitLab.
 2. In the [Render dashboard](https://dashboard.render.com), choose **New → Blueprint** and select the repo — Render reads `render.yaml` automatically. (Note: a service's runtime and region are fixed at creation — to switch an existing service to Docker/Frankfurt you must delete and recreate it.)
 3. When prompted, set the **`DISCORD_TOKEN`** environment variable to your bot token (it is marked `sync: false`, so it is never committed).
-4. Deploy. The service is healthy once `GET /healthz` returns `200` — it reports Discord connection state, the number of active voice sessions, and station-health-sweep status.
+4. Deploy. The service is healthy once `GET /healthz` returns `200` — it reports Discord connection state and the number of active voice sessions.
 
 **FFmpeg & yt-dlp:** the Docker image installs Debian's FFmpeg (`apt-get install ffmpeg`) and the standalone `yt-dlp` binary (for `!yt`). The `ffmpeg-static` npm binary is deliberately **not** used in production — it segfaults on Render's runtime — and is pruned from the image along with the other devDependencies.
 
 **Debug endpoints** (useful when a station won't play in production):
 - `GET /debug/stream/<number>` – fetches the station's stream URL from the server's network and reports HTTP status, content type, and bytes read (detects geo-blocks and dead streams).
 - `GET /debug/ffmpeg/<number>` – runs the station through the bot's real FFmpeg transcode pipeline for 3 seconds and reports the binary used, bytes produced, stderr, and exit code/signal.
-- `GET /debug/stations` – results of the last station health sweep (which stations were unreachable and why).
 
 **Free-tier caveat:** Render's free web services **spin down after ~15 minutes without inbound HTTP traffic**, which takes the bot offline until the next request wakes it (and drops any live voice sessions). To keep it online 24/7 either:
 - point a free uptime pinger (e.g. [UptimeRobot](https://uptimerobot.com) or [cron-job.org](https://cron-job.org)) at `https://<your-service>.onrender.com/healthz` every 5–10 minutes, or
@@ -171,7 +167,7 @@ Stations are loaded from **`stations.txt`** at startup. The file must contain a 
 - **`src/voice.ts`** – Voice engine: one player + connection **per guild**, play sources (station / radio-browser / YouTube), stream watchdog with auto-restart, volume, sleep timer, alone/24-7 handling, stats hooks
 - **`src/storage.ts`** – JSON persistence for per-guild settings (favorites, volume, DJ role, 24/7, last station) and play stats
 - **`src/metadata.ts`** – ICY/Shoutcast metadata client for `!np` song titles
-- **`src/health.ts`** – Stream probing + periodic station health sweep
+- **`src/health.ts`** – Stream probing (used by the `/debug` endpoints)
 - **`src/radioBrowser.ts`** – radio-browser.info API client (search, resolve, click counting)
 - **`src/youtube.ts`** – yt-dlp integration (resolve URL/search → direct audio URL)
 - **`src/server.ts`** – HTTP health endpoint (`/healthz`) plus stream/FFmpeg/station debug endpoints

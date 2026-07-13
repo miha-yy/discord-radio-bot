@@ -11,7 +11,6 @@ import { loadStations } from './radioList.js';
 import { updateAloneState } from './voice.js';
 import { startHealthServer } from './server.js';
 import { initStorage } from './storage.js';
-import { startStationHealthSweep } from './health.js';
 import { registerSlashCommands, handleChatInputCommand, handleAutocomplete } from './slash.js';
 
 const client = new Client({
@@ -95,8 +94,6 @@ client.once('clientReady', async () => {
     const error = err instanceof Error ? err : new Error(String(err));
     console.error('Failed to register slash commands:', error.message);
   }
-
-  startStationHealthSweep();
 });
 
 const token = process.env.DISCORD_TOKEN;

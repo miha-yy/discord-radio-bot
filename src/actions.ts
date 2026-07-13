@@ -38,7 +38,6 @@ import {
   MAX_VOLUME,
 } from './storage.js';
 import { fetchNowPlaying } from './metadata.js';
-import { isStationUnhealthy } from './health.js';
 import {
   searchRadioBrowser,
   resolveRadioBrowserStation,
@@ -116,10 +115,7 @@ function buildPlayConfirmation(
   if (source.kind === 'station') {
     const embed = buildStationEmbed(source.station, `📻 Now playing: ${source.station.name}`);
     embed.setFooter({ text: footer });
-    const warn = isStationUnhealthy(source.station.name)
-      ? '⚠️ This station failed the last health check — it may not play.'
-      : undefined;
-    return { content: warn, embeds: [embed] };
+    return { embeds: [embed] };
   }
 
   if (source.kind === 'radio-browser') {
