@@ -50,13 +50,17 @@ function createPlayer(guildId: string): AudioPlayer {
   player.on('stateChange', (oldState, newState) => {
     switch (newState.status) {
       case AudioPlayerStatus.Playing:
-        if (oldState.status === AudioPlayerStatus.Idle) {
-          console.log(`[${guildId}] Playing radio stream`);
+        if (oldState.status !== AudioPlayerStatus.Playing) {
+          console.log(`[${guildId}] Playing radio stream (was: ${oldState.status})`);
         }
         break;
-      case AudioPlayerStatus.Idle:
-        console.log(`[${guildId}] Stream stopped or error – will not auto-restart (use !play again if needed)`);
+      case AudioPlayerStatus.Idle: {
+        const playedMs = 'resource' in oldState ? oldState.resource.playbackDuration : null;
+        console.log(
+          `[${guildId}] Stream stopped or error (was: ${oldState.status}, played ${playedMs ?? '?'} ms) – will not auto-restart (use !play again if needed)`
+        );
         break;
+      }
       default:
         break;
     }
@@ -105,10 +109,10 @@ function createStreamResource(guildId: string, streamUrl: string) {
     const message = chunk.toString().trim();
     if (message) console.error(`[${guildId}] [ffmpeg] ${message}`);
   });
-  ffmpeg.process.on('close', (code) => {
-    if (code !== 0 && code !== null) {
-      console.error(`[${guildId}] [ffmpeg] exited with code ${code} (stream: ${streamUrl})`);
-    }
+  // code 0 = the server ended the stream (a live stream should never end);
+  // null + signal = ffmpeg was killed, usually because the player idled first.
+  ffmpeg.process.on('close', (code, signal) => {
+    console.log(`[${guildId}] [ffmpeg] process closed (code=${code}, signal=${signal}, stream: ${streamUrl})`);
   });
 
   return createAudioResource(ffmpeg, {
