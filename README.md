@@ -133,6 +133,8 @@ npm run dev
 | `YTDLP_COOKIES` | Path to a Netscape-format cookies.txt for YouTube (fixes the datacenter-IP bot check; see above). |
 | `YTDLP_EXTRACTOR_ARGS` | Extra `--extractor-args` for the first yt-dlp attempt. |
 | `YTDLP_FALLBACK_CLIENTS` | Player clients for the bot-check retry (default `web_embedded,android_vr,tv`). |
+| `YTDLP_JS_RUNTIMES` | JS runtime for yt-dlp's challenge solver (default: the bot's own node binary; `off` disables). |
+| `YTDLP_TIMEOUT_MS` | Timeout per yt-dlp call (default 90000; slow cloud instances need the headroom). |
 | `STATION_HEALTH_INTERVAL_MIN` | Minutes between station health sweeps (default 360; `0`/`off` disables). |
 
 ## Deploy on Render

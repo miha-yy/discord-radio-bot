@@ -11,14 +11,17 @@ FROM node:22-slim
 
 # Real (dynamically linked) FFmpeg from Debian: the static ffmpeg-static npm
 # binary segfaults on Render's runtime, so production uses the distro build.
-# yt-dlp (standalone binary, no Python needed) powers the !yt command.
+# yt-dlp (powers !yt) is pip-installed into a venv rather than using the
+# standalone binary: the PyInstaller binary unpacks a whole Python runtime on
+# EVERY invocation, which costs 10+ seconds on small cloud instances (0.1
+# vCPU) and causes "!yt timed out" errors. A pip install also allows yt-dlp
+# plugins (e.g. a PO token provider) later.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl \
- && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux -o /usr/local/bin/yt-dlp \
- && chmod +x /usr/local/bin/yt-dlp \
- && apt-get purge -y curl \
- && apt-get autoremove -y \
- && rm -rf /var/lib/apt/lists/*
+ && apt-get install -y --no-install-recommends ffmpeg ca-certificates python3 python3-venv \
+ && python3 -m venv /opt/yt-dlp \
+ && /opt/yt-dlp/bin/pip install --no-cache-dir --upgrade yt-dlp \
+ && ln -s /opt/yt-dlp/bin/yt-dlp /usr/local/bin/yt-dlp \
+ && rm -rf /var/lib/apt/lists/* /root/.cache
 
 WORKDIR /app
 ENV NODE_ENV=production

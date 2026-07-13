@@ -20,7 +20,13 @@ import { join } from 'node:path';
  * YTDLP_FALLBACK_CLIENTS the client list of the retry.
  */
 
-const RESOLVE_TIMEOUT_MS = 30_000;
+// Generous default: on tiny cloud instances (Render free tier's 0.1 vCPU)
+// yt-dlp startup + YouTube round-trips + JS challenge solving can take tens
+// of seconds. Override with YTDLP_TIMEOUT_MS.
+const RESOLVE_TIMEOUT_MS = (() => {
+  const env = parseInt(process.env.YTDLP_TIMEOUT_MS ?? '', 10);
+  return Number.isFinite(env) && env >= 5000 ? env : 90_000;
+})();
 
 const FALLBACK_CLIENTS = process.env.YTDLP_FALLBACK_CLIENTS ?? 'web_embedded,android_vr,tv';
 
@@ -121,7 +127,12 @@ function runYtDlp(args: string[]): Promise<YtDlpRun> {
 
     const timer = setTimeout(() => {
       child.kill();
-      finish({ ok: false, stdout, stderr, fatalError: 'YouTube lookup timed out after 30s. Try again.' });
+      finish({
+        ok: false,
+        stdout,
+        stderr,
+        fatalError: `YouTube lookup timed out after ${Math.round(RESOLVE_TIMEOUT_MS / 1000)}s. Try again.`,
+      });
     }, RESOLVE_TIMEOUT_MS);
 
     child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
