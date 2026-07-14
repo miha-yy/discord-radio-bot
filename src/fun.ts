@@ -34,9 +34,42 @@ const WHOIS_TEMPLATES = [
   '⚖️ The council has voted: {user} is {thing}.',
 ];
 
-/** People in voice channels are always cached (voice states); the wider
- * member cache only holds members we have seen, which is fine for fun. */
-function whoisCandidates(guild: Guild): GuildMember[] {
+/** Cache the fetched member list briefly — fetching all members is a gateway
+ * round-trip and !whois tends to get spammed. */
+const MEMBER_POOL_TTL_MS = 5 * 60 * 1000;
+const memberPools = new Map<string, { at: number; members: GuildMember[] }>();
+
+/**
+ * All human members of the guild. Needs the Server Members privileged intent
+ * (Developer Portal → Bot → Privileged Gateway Intents); without it the fetch
+ * times out and we return [] so the caller can fall back to voice/cache.
+ * Failures are cached too, so a missing intent costs one 10 s wait per guild
+ * per TTL instead of on every call.
+ */
+async function fetchMemberPool(guild: Guild): Promise<GuildMember[]> {
+  const cached = memberPools.get(guild.id);
+  if (cached && Date.now() - cached.at < MEMBER_POOL_TTL_MS) return cached.members;
+  let humans: GuildMember[] = [];
+  if (guild.memberCount <= 10_000) {
+    try {
+      const fetched = await guild.members.fetch({ time: 10_000 });
+      humans = [...fetched.filter((m) => !m.user.bot).values()];
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      console.error(`[whois] Cannot fetch the member list (is the Server Members intent enabled?): ${error.message}`);
+    }
+  }
+  memberPools.set(guild.id, { at: Date.now(), members: humans });
+  return humans;
+}
+
+/** The whole server when the Server Members intent is available; otherwise
+ * people in voice channels (always cached via voice states), then whatever
+ * members we have seen. */
+async function whoisCandidates(guild: Guild): Promise<GuildMember[]> {
+  const everyone = await fetchMemberPool(guild);
+  if (everyone.length > 0) return everyone;
+
   const inVoice = new Map<string, GuildMember>();
   for (const channel of guild.channels.cache.values()) {
     if (!channel.isVoiceBased()) continue;
@@ -54,7 +87,7 @@ export async function whoisAction(ctx: CommandContext, query: string): Promise<v
     await ctx.reply('Usage: `!whois <something>` — e.g. `!whois cute`. I will find the right person.');
     return;
   }
-  const candidates = whoisCandidates(ctx.guild);
+  const candidates = await whoisCandidates(ctx.guild);
   if (candidates.length === 0) {
     await ctx.reply('I could not find anyone to judge — join a voice channel and try again.');
     return;

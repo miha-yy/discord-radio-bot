@@ -33,6 +33,7 @@ The bot keeps an **independent voice session per server**, so a single bot insta
 1. **Create a Discord application and bot**
    - Go to [Discord Developer Portal](https://discord.com/developers/applications) → New Application
    - Open **Bot** → Add Bot → copy the **Token**
+   - Still on the **Bot** page, under **Privileged Gateway Intents**, enable **Message Content Intent** (needed for `!` commands) and **Server Members Intent** (needed for `!whois` to pick from all members — without it the bot won't log in)
    - Under **OAuth2 → URL Generator**, enable scopes: `bot`, `applications.commands`; permissions: `Send Messages`, `Connect`, `Speak`, `Use Voice Activity`
 
 2. **Clone / open the project and install dependencies**
@@ -91,7 +92,7 @@ Every text command has a slash-command twin (`/play`, `/stations`, …) with aut
 
 | Command | Description |
 |---------|-------------|
-| `!whois <something>` | Tags a random member and declares them *something* — e.g. `!whois cute`. Picks from people in voice channels first, falling back to cached members. |
+| `!whois <something>` | Tags a random server member and declares them *something* — e.g. `!whois cute`. Picks from the full member list (needs the **Server Members Intent**, see Setup); the list is cached for 5 minutes. |
 | `!ship @user1 @user2` | Compatibility check with a 💘 progress bar. One mention ships them with you. Seeded by the pair, so the score never changes — it's science. |
 | `!rate <thing>` | Rates anything out of 10 (also seeded — consistent verdicts). Rating the bot itself is always 10/10. |
 | `!8ball <question>` | The classic magic 8-ball. |

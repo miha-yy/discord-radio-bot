@@ -19,6 +19,9 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.MessageContent,
+    // Lets !whois pick from ALL server members, not just cached ones. Needs
+    // the "Server Members Intent" toggle in the Developer Portal (Bot page).
+    GatewayIntentBits.GuildMembers,
   ],
 });
 
@@ -112,5 +115,11 @@ startHealthServer(() => client.isReady());
 client.login(token).catch((err: unknown) => {
   const error = err instanceof Error ? err : new Error(String(err));
   console.error('Login failed:', error);
+  if (/disallowed intents/i.test(error.message)) {
+    console.error(
+      'Enable "Server Members Intent" and "Message Content Intent" under ' +
+        'Bot → Privileged Gateway Intents in the Discord Developer Portal, then restart.'
+    );
+  }
   process.exit(1);
 });
