@@ -21,9 +21,20 @@ import {
   alwaysOnAction,
   topAction,
   youtubeAction,
+  skipAction,
+  queueAction,
   radioAction,
   radioPlayAction,
 } from './actions.js';
+import {
+  whoisAction,
+  shipAction,
+  rateAction,
+  eightBallAction,
+  chooseAction,
+  rollAction,
+  flipAction,
+} from './fun.js';
 import { loadStations } from './radioList.js';
 import { filterStations, toEntries } from './stationsUI.js';
 import { searchRadioBrowser } from './radioBrowser.js';
@@ -112,9 +123,23 @@ function commandBuilders() {
     new SlashCommandBuilder().setName('top').setDescription('Most played stations'),
     new SlashCommandBuilder()
       .setName('yt')
-      .setDescription('Play audio from YouTube')
+      .setDescription('Play audio from YouTube (queues if YouTube is already playing)')
       .addStringOption((o) =>
         o.setName('query').setDescription('YouTube link or search terms').setRequired(true)
+      ),
+    new SlashCommandBuilder().setName('skip').setDescription('Skip to the next queued YouTube track'),
+    new SlashCommandBuilder()
+      .setName('queue')
+      .setDescription('The YouTube play queue')
+      .addSubcommand((s) => s.setName('show').setDescription('Show the queue'))
+      .addSubcommand((s) => s.setName('clear').setDescription('Remove all queued tracks'))
+      .addSubcommand((s) =>
+        s
+          .setName('remove')
+          .setDescription('Remove one queued track')
+          .addIntegerOption((o) =>
+            o.setName('number').setDescription('Queue position to remove').setRequired(true).setMinValue(1)
+          )
       ),
     new SlashCommandBuilder()
       .setName('radio')
@@ -122,6 +147,34 @@ function commandBuilders() {
       .addStringOption((o) =>
         o.setName('query').setDescription('Station name or genre').setRequired(true).setAutocomplete(true)
       ),
+    new SlashCommandBuilder()
+      .setName('whois')
+      .setDescription('The bot decides which member fits the description')
+      .addStringOption((o) => o.setName('description').setDescription('e.g. "cute"').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('ship')
+      .setDescription('Compatibility check between two members')
+      .addUserOption((o) => o.setName('user1').setDescription('First person').setRequired(true))
+      .addUserOption((o) => o.setName('user2').setDescription('Second person (empty = you)')),
+    new SlashCommandBuilder()
+      .setName('rate')
+      .setDescription('Rate anything out of 10')
+      .addStringOption((o) => o.setName('thing').setDescription('What should I rate?').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('8ball')
+      .setDescription('Ask the magic 8-ball a yes/no question')
+      .addStringOption((o) => o.setName('question').setDescription('Your question').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('choose')
+      .setDescription('Let the bot pick one of your options')
+      .addStringOption((o) =>
+        o.setName('options').setDescription('Options separated by | (e.g. pizza | kebab)').setRequired(true)
+      ),
+    new SlashCommandBuilder()
+      .setName('roll')
+      .setDescription('Roll dice')
+      .addStringOption((o) => o.setName('dice').setDescription('e.g. 20 or 2d20 (default d6)')),
+    new SlashCommandBuilder().setName('flip').setDescription('Flip a coin'),
   ];
 }
 
@@ -211,6 +264,16 @@ export async function handleChatInputCommand(interaction: ChatInputCommandIntera
       case 'yt':
         await youtubeAction(ctx, interaction.options.getString('query', true));
         break;
+      case 'skip':
+        await skipAction(ctx);
+        break;
+      case 'queue': {
+        const sub = interaction.options.getSubcommand();
+        if (sub === 'clear') await queueAction(ctx, ['clear']);
+        else if (sub === 'remove') await queueAction(ctx, ['remove', String(interaction.options.getInteger('number', true))]);
+        else await queueAction(ctx, []);
+        break;
+      }
       case 'radio': {
         const query = interaction.options.getString('query', true);
         // Autocomplete picks come back as rb:<uuid> and play directly.
@@ -218,6 +281,31 @@ export async function handleChatInputCommand(interaction: ChatInputCommandIntera
         else await radioAction(ctx, query);
         break;
       }
+      case 'whois':
+        await whoisAction(ctx, interaction.options.getString('description', true));
+        break;
+      case 'ship': {
+        // shipAction parses mentions from raw text — hand it the two picks.
+        const user1 = interaction.options.getUser('user1', true);
+        const user2 = interaction.options.getUser('user2');
+        await shipAction(ctx, [user1, user2].filter(Boolean).map((u) => `<@${u!.id}>`).join(' '));
+        break;
+      }
+      case 'rate':
+        await rateAction(ctx, interaction.options.getString('thing', true));
+        break;
+      case '8ball':
+        await eightBallAction(ctx, interaction.options.getString('question', true));
+        break;
+      case 'choose':
+        await chooseAction(ctx, interaction.options.getString('options', true));
+        break;
+      case 'roll':
+        await rollAction(ctx, interaction.options.getString('dice') ?? '');
+        break;
+      case 'flip':
+        await flipAction(ctx);
+        break;
       default:
         await ctx.reply('Unknown command.');
         break;

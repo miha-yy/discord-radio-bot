@@ -9,6 +9,7 @@ The bot keeps an **independent voice session per server**, so a single bot insta
 - **Live radio** from `stations.txt` (124 stations by default), with paginated lists, ▶ play buttons, and filtering by name/genre/region
 - **Worldwide search** — `!radio jazz` searches ~50k stations on radio-browser.info and plays from the results
 - **YouTube playback** — `!yt <link or search>` plays videos and livestreams through yt-dlp
+- **YouTube queue** — a second `!yt` while YouTube is playing queues the track (up to 25); `!queue` shows/edits it, `!skip` jumps ahead, and tracks auto-advance when one ends
 - **Auto-restart watchdog** — dropped live streams are restarted up to 3 times with backoff; if the stream can't be revived, the bot reports it in the text channel where playback started (including the FFmpeg error) instead of going silent
 - **Now playing** — `!np` shows the current song title (ICY/Shoutcast metadata), uptime, and volume
 - **Slash commands** — every command also exists as `/command`, with autocomplete for local stations (`/play`) and worldwide search (`/radio`)
@@ -18,6 +19,7 @@ The bot keeps an **independent voice session per server**, so a single bot insta
 - **DJ role** — optionally restrict playback control to one role (`!dj @role`)
 - **24/7 mode** — `!247 on` disables the auto-leave-when-alone timeout
 - **Stats** — `!top` shows the most played stations with listening hours
+- **Fun commands** — `!whois cute` tags a random listener, `!ship @a @b` compatibility checks, `!rate <thing>`, `!8ball`, `!choose`, `!roll`, `!flip`
 - **Auto-disconnect** — leaves after 5 minutes alone in a channel (unless 24/7 mode is on), tracked per server
 
 ## Requirements
@@ -58,6 +60,8 @@ Every text command has a slash-command twin (`/play`, `/stations`, …) with aut
 | `!np` | What's playing: station, current song (if the stream publishes titles), uptime, volume, sleep timer. |
 | `!volume [10–200]` | Show or set this server's volume. Applied by restarting the FFmpeg pipeline, so there's no steady-state CPU cost. |
 | `!sleep <minutes \| off>` | Stop playback automatically after N minutes (max 480). |
+| `!skip` | Skip to the next queued YouTube track (with an empty queue: stop and leave, like the track finishing). |
+| `!queue [clear \| remove <n>]` | Show the YouTube queue, clear it, or remove one entry. |
 
 ### Finding stations
 
@@ -66,7 +70,7 @@ Every text command has a slash-command twin (`/play`, `/stations`, …) with aut
 | `!stations [filter] [page]` | Paginated station list (20/page) with ▶ buttons. Optional filter, e.g. `!stations rock` or `!stations koroška 2`. |
 | `!search <query>` | Search the local list by name/genre/region — returns up to 15 matches with play buttons. |
 | `!radio <query>` | Search radio-browser.info (~50k worldwide stations); play results with the ▶ buttons. `/radio` autocompletes live from the API. |
-| `!yt <link or search>` | Play YouTube audio — normal videos (bot leaves when the video ends) and livestreams (auto-restarted like radio). See [YouTube bot check](#youtube-bot-check) if it fails on a cloud host. |
+| `!yt <link or search>` | Play YouTube audio — normal videos and livestreams (auto-restarted like radio). If YouTube is already playing, the track is **queued** instead; when the queue runs out, the bot leaves. See [YouTube bot check](#youtube-bot-check) if it fails on a cloud host. |
 
 ### Favorites
 
@@ -80,8 +84,19 @@ Every text command has a slash-command twin (`/play`, `/stations`, …) with aut
 
 | Command | Description |
 |---------|-------------|
-| `!dj [@role \| off]` | Restrict playback control (`play/stop/volume/sleep/yt/radio`) to a role. Members with Manage Server always bypass it. |
+| `!dj [@role \| off]` | Restrict playback control (`play/stop/volume/sleep/yt/skip/queue edits/radio`) to a role. Members with Manage Server always bypass it. |
 | `!247 [on \| off]` | 24/7 mode — never auto-leave an empty voice channel. |
+
+### Fun
+
+| Command | Description |
+|---------|-------------|
+| `!whois <something>` | Tags a random member and declares them *something* — e.g. `!whois cute`. Picks from people in voice channels first, falling back to cached members. |
+| `!ship @user1 @user2` | Compatibility check with a 💘 progress bar. One mention ships them with you. Seeded by the pair, so the score never changes — it's science. |
+| `!rate <thing>` | Rates anything out of 10 (also seeded — consistent verdicts). Rating the bot itself is always 10/10. |
+| `!8ball <question>` | The classic magic 8-ball. |
+| `!choose a \| b \| c` | Picks one option (also accepts commas or spaces as separators). |
+| `!roll [2d20]` / `!flip` | Dice (default d6, up to 20d1000) and coin flip. |
 
 ### Stats
 
@@ -91,7 +106,8 @@ Every text command has a slash-command twin (`/play`, `/stations`, …) with aut
 
 ## Reliability behavior
 
-- **Watchdog:** when a live stream drops, the bot restarts it after 2 s / 5 s / 10 s. After 60 s of stable playback the retry budget resets. If all retries fail, the bot posts a warning (with the last FFmpeg error) to the channel that started playback, then leaves.
+- **Watchdog:** when a live stream drops, the bot restarts it after 2 s / 5 s / 10 s. After 60 s of stable playback the retry budget resets. If all retries fail, the bot posts a warning (with the last FFmpeg error) to the channel that started playback, then plays the next queued track — or leaves when there is none.
+- **Queue staleness:** YouTube stream URLs expire after a few hours, so a queued track that waited more than an hour is re-resolved through yt-dlp just before it plays (a short gap on slow instances). Tracks that fail to resolve or start are skipped with a notice instead of stalling the queue.
 
 ## YouTube bot check
 
@@ -162,9 +178,10 @@ Stations are loaded from **`stations.txt`** at startup. The file must contain a 
 - **`src/index.ts`** – Entry point: Discord client, event wiring (messages, buttons, slash commands, autocomplete), ready handler, login
 - **`src/actions.ts`** – Core command logic shared by the text and slash front-ends (play/stop/np/search/fav/volume/sleep/dj/247/top/yt/radio)
 - **`src/commands.ts`** – Text (`!`) command parsing → actions
+- **`src/fun.ts`** – Fun commands (whois/ship/rate/8ball/choose/roll/flip)
 - **`src/slash.ts`** – Slash command definitions, registration, dispatch, and autocomplete
 - **`src/interactions.ts`** – Button handlers: station ▶ buttons, radio-browser ▶ buttons, list pagination
-- **`src/voice.ts`** – Voice engine: one player + connection **per guild**, play sources (station / radio-browser / YouTube), stream watchdog with auto-restart, volume, sleep timer, alone/24-7 handling, stats hooks
+- **`src/voice.ts`** – Voice engine: one player + connection **per guild**, play sources (station / radio-browser / YouTube), YouTube queue with auto-advance, stream watchdog with auto-restart, volume, sleep timer, alone/24-7 handling, stats hooks
 - **`src/storage.ts`** – JSON persistence for per-guild settings (favorites, volume, DJ role, 24/7, last station) and play stats
 - **`src/metadata.ts`** – ICY/Shoutcast metadata client for `!np` song titles
 - **`src/health.ts`** – Stream probing (used by the `/debug` endpoints)

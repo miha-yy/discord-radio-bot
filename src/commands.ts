@@ -15,9 +15,20 @@ import {
   alwaysOnAction,
   topAction,
   youtubeAction,
+  skipAction,
+  queueAction,
   radioAction,
   parseStationsArgs,
 } from './actions.js';
+import {
+  whoisAction,
+  shipAction,
+  rateAction,
+  eightBallAction,
+  chooseAction,
+  rollAction,
+  flipAction,
+} from './fun.js';
 
 /**
  * Text (`!`) command front-end. Parsing happens here; the actual behavior
@@ -49,7 +60,23 @@ const COMMAND_ALIASES: Record<string, string> = {
   stats: 'top',
   yt: 'yt',
   youtube: 'yt',
+  skip: 'skip',
+  next: 'skip',
+  queue: 'queue',
+  q: 'queue',
   radio: 'radio',
+  whois: 'whois',
+  ship: 'ship',
+  rate: 'rate',
+  '8ball': '8ball',
+  eightball: '8ball',
+  choose: 'choose',
+  pick: 'choose',
+  roll: 'roll',
+  dice: 'roll',
+  flip: 'flip',
+  coin: 'flip',
+  coinflip: 'flip',
 };
 
 export interface ParsedCommand {
@@ -127,8 +154,35 @@ export async function handleMessageCommand(message: Message): Promise<void> {
       case 'yt':
         await youtubeAction(ctx, parsed.args);
         break;
+      case 'skip':
+        await skipAction(ctx);
+        break;
+      case 'queue':
+        await queueAction(ctx, parsed.args.split(/\s+/).filter(Boolean));
+        break;
       case 'radio':
         await radioAction(ctx, parsed.args);
+        break;
+      case 'whois':
+        await whoisAction(ctx, parsed.args);
+        break;
+      case 'ship':
+        await shipAction(ctx, parsed.args);
+        break;
+      case 'rate':
+        await rateAction(ctx, parsed.args);
+        break;
+      case '8ball':
+        await eightBallAction(ctx, parsed.args);
+        break;
+      case 'choose':
+        await chooseAction(ctx, parsed.args);
+        break;
+      case 'roll':
+        await rollAction(ctx, parsed.args);
+        break;
+      case 'flip':
+        await flipAction(ctx);
         break;
       default:
         break;

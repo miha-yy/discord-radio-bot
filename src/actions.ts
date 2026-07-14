@@ -28,6 +28,11 @@ import {
   updateAloneState,
   sourceName,
   sourceStreamUrl,
+  enqueueTrack,
+  clearQueue,
+  removeFromQueue,
+  skipToNext,
+  QUEUE_MAX,
   type PlaySource,
 } from './voice.js';
 import {
@@ -67,7 +72,7 @@ export interface CommandContext {
 const MAX_FAVORITES = 25;
 const SLEEP_MAX_MINUTES = 480;
 
-function logAction(ctx: CommandContext, text: string): void {
+export function logAction(ctx: CommandContext, text: string): void {
   console.log(`[COMMAND] ${text} | Server: ${ctx.guild.name} (${ctx.guild.id}) | User: ${ctx.userTag}`);
 }
 
@@ -247,6 +252,13 @@ export async function nowPlayingAction(ctx: CommandContext): Promise<void> {
     { name: 'Volume', value: `${session.volume}%`, inline: true },
     { name: 'Channel', value: `<#${session.channelId}>`, inline: true }
   );
+  if (session.queue.length > 0) {
+    embed.addFields({
+      name: 'Queue',
+      value: `${session.queue.length} track${session.queue.length === 1 ? '' : 's'} — see !queue`,
+      inline: true,
+    });
+  }
   if (session.sleepUntil) {
     embed.addFields({
       name: 'Sleep timer',
@@ -575,7 +587,7 @@ export async function topAction(ctx: CommandContext): Promise<void> {
 export async function youtubeAction(ctx: CommandContext, query: string): Promise<void> {
   logAction(ctx, `yt "${query}"`);
   if (!query) {
-    await ctx.reply('Usage: `!yt <YouTube link or search terms>` — e.g. `!yt lofi hip hop radio`.');
+    await ctx.reply('Usage: `!yt <YouTube link or search terms>` — e.g. `!yt lofi hip hop radio`. Repeat while YouTube plays to queue more.');
     return;
   }
   // Fail fast on the cheap checks before spending up to 30 s in yt-dlp.
@@ -594,7 +606,123 @@ export async function youtubeAction(ctx: CommandContext, query: string): Promise
     await ctx.reply(resolved.error);
     return;
   }
+
+  // YouTube already playing here → add to the queue instead of cutting it off.
+  // (Radio keeps the old behavior: it never ends, so !yt just replaces it.)
+  const session = getSession(ctx.guild.id);
+  if (session && session.source.kind === 'youtube') {
+    const position = enqueueTrack(ctx.guild.id, {
+      track: resolved.track,
+      requestedBy: ctx.userTag,
+      resolvedAt: Date.now(),
+    });
+    if (position === 'full') {
+      await ctx.reply(`The queue is full (${QUEUE_MAX} tracks) — wait for a track to finish or \`!queue remove\` one.`);
+      return;
+    }
+    if (typeof position === 'number') {
+      const liveNote = session.source.track.isLive
+        ? '\n_The current livestream never ends on its own — `!skip` jumps to the queue._'
+        : '';
+      await ctx.reply(`➕ Queued **#${position}**: **${resolved.track.title}** — \`!queue\` to view, \`!skip\` to jump.${liveNote}`);
+      return;
+    }
+    // Session vanished between the checks — fall through and play directly.
+  }
+
   await startPlayback(ctx, { kind: 'youtube', track: resolved.track });
+}
+
+export async function skipAction(ctx: CommandContext): Promise<void> {
+  logAction(ctx, 'skip');
+  const djError = checkDj(ctx);
+  if (djError) {
+    await ctx.reply(djError);
+    return;
+  }
+  const session = getSession(ctx.guild.id);
+  if (!session) {
+    await ctx.reply('Nothing is playing on this server.');
+    return;
+  }
+  if (session.source.kind !== 'youtube') {
+    await ctx.reply('Live radio has no queue to skip — use `!play <station>` to switch or `!stop` to stop.');
+    return;
+  }
+  const result = skipToNext(ctx.guild.id);
+  if (!result) {
+    await ctx.reply('Nothing is playing on this server.');
+    return;
+  }
+  await ctx.reply(
+    result.remaining > 0
+      ? `⏭ Skipped **${result.skipped}**.`
+      : `⏭ Skipped **${result.skipped}** — the queue was empty, so I stopped and left the voice channel.`
+  );
+}
+
+export async function queueAction(ctx: CommandContext, args: string[]): Promise<void> {
+  const sub = (args[0] ?? '').toLowerCase();
+
+  if (sub === 'clear') {
+    logAction(ctx, 'queue clear');
+    const djError = checkDj(ctx);
+    if (djError) {
+      await ctx.reply(djError);
+      return;
+    }
+    const removed = clearQueue(ctx.guild.id);
+    await ctx.reply(
+      removed > 0 ? `🗑 Cleared **${removed}** queued track${removed === 1 ? '' : 's'}.` : 'The queue is already empty.'
+    );
+    return;
+  }
+
+  if (sub === 'remove' || sub === 'rm') {
+    logAction(ctx, `queue remove ${args[1] ?? ''}`);
+    const djError = checkDj(ctx);
+    if (djError) {
+      await ctx.reply(djError);
+      return;
+    }
+    const n = parseInt(args[1] ?? '', 10);
+    if (!Number.isFinite(n) || n < 1) {
+      await ctx.reply('Usage: `!queue remove <number>` — `!queue` shows the numbers.');
+      return;
+    }
+    const removed = removeFromQueue(ctx.guild.id, n);
+    await ctx.reply(
+      removed ? `Removed **${removed.track.title}** from the queue.` : `There is no queued track #${n}. See \`!queue\`.`
+    );
+    return;
+  }
+
+  logAction(ctx, 'queue');
+  const session = getSession(ctx.guild.id);
+  if (!session || session.source.kind !== 'youtube') {
+    await ctx.reply(
+      'The queue is only used for YouTube playback. Start with `!yt <link or search>` — a second `!yt` while one plays adds to the queue.'
+    );
+    return;
+  }
+  const track = session.source.track;
+  const lines = session.queue.map(
+    (item, i) => `${i + 1}. **${item.track.title}** — requested by ${item.requestedBy}`
+  );
+  const embed = new EmbedBuilder()
+    .setColor(EMBED_COLOR)
+    .setTitle('🎶 YouTube queue')
+    .setDescription(
+      [
+        `▶ Now: **${track.title}**${track.isLive ? ' (🔴 livestream)' : ''}`,
+        '',
+        lines.length ? lines.join('\n') : '_Nothing queued — `!yt <link or search>` adds a track._',
+      ].join('\n')
+    );
+  if (lines.length) {
+    embed.setFooter({ text: '!skip plays the next track · !queue remove <n> drops one · !queue clear empties it' });
+  }
+  await ctx.reply({ embeds: [embed] });
 }
 
 function radioBrowserLine(s: RadioBrowserStation, index: number): string {

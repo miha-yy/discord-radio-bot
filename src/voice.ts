@@ -14,7 +14,7 @@ import {
 import type { Guild, VoiceBasedChannel } from 'discord.js';
 import type { RadioStation } from './radioList.js';
 import { sendRadioBrowserClick, type RadioBrowserStation } from './radioBrowser.js';
-import type { YouTubeTrack } from './youtube.js';
+import { resolveYouTube, type YouTubeTrack } from './youtube.js';
 import {
   getGuildSettings,
   updateGuildSettings,
@@ -45,10 +45,21 @@ export function sourceIsLive(source: PlaySource): boolean {
   return source.kind === 'youtube' ? source.track.isLive : true;
 }
 
+/** A YouTube track waiting its turn in a guild's queue. */
+export interface QueueItem {
+  track: YouTubeTrack;
+  /** Tag of the user who queued it, for the queue display. */
+  requestedBy: string;
+  /** When yt-dlp resolved the stream URL — stale items get re-resolved. */
+  resolvedAt: number;
+}
+
 export interface GuildVoiceSession {
   connection: VoiceConnection;
   player: AudioPlayer;
   source: PlaySource;
+  /** Upcoming YouTube tracks; played in order when the current one ends. */
+  queue: QueueItem[];
   guild: Guild;
   channelId: string;
   /** Text channel that started playback; used for drop/finish notifications. */
@@ -84,6 +95,12 @@ const RESTART_DELAYS_MS = [2000, 5000, 10000];
 /** Consider a stream healthy again after playing this long, resetting the
  * restart budget so a hiccup hours later gets a fresh set of retries. */
 const STABLE_AFTER_MS = 60 * 1000;
+
+/** Most tracks a guild can queue up. */
+export const QUEUE_MAX = 25;
+/** Queued items older than this get re-resolved before playing — YouTube
+ * stream URLs expire after a few hours. */
+const QUEUE_STALE_MS = 60 * 60 * 1000;
 
 function clearAloneTimer(session: GuildVoiceSession): void {
   if (session.aloneTimer) {
@@ -174,7 +191,7 @@ function createPlayer(guildId: string): AudioPlayer {
 /**
  * The stream ended without us stopping it. For live sources, retry with
  * backoff and tell the text channel if we give up; a non-live YouTube video
- * ending is normal — announce it and leave.
+ * ending is normal — play the next queued track, or leave when there is none.
  */
 function handleStreamDrop(session: GuildVoiceSession): void {
   const guildId = session.guild.id;
@@ -182,14 +199,17 @@ function handleStreamDrop(session: GuildVoiceSession): void {
 
   if (!sourceIsLive(session.source)) {
     console.log(`[${guildId}] Finished playing "${name}"`);
-    notify(session, `Finished playing **${name}**. Leaving the voice channel — use \`!play\` or \`!yt\` to start something new.`);
-    stopAndLeave(guildId);
+    void advanceQueueOrLeave(session, `Finished playing **${name}**.`);
     return;
   }
 
   session.restartAttempts += 1;
   if (session.restartAttempts > MAX_RESTART_ATTEMPTS) {
     console.error(`[${guildId}] Stream for "${name}" dropped; giving up after ${MAX_RESTART_ATTEMPTS} restarts`);
+    if (session.queue.length > 0) {
+      void advanceQueueOrLeave(session, `⚠️ The stream for **${name}** kept dropping — moving on.`);
+      return;
+    }
     const stderrHint = session.lastStderr ? `\n\`\`\`${session.lastStderr.slice(-300)}\`\`\`` : '';
     notify(
       session,
@@ -214,6 +234,109 @@ function handleStreamDrop(session: GuildVoiceSession): void {
       handleStreamDrop(session);
     }
   }, delay);
+}
+
+/**
+ * Play the next queued track on the existing connection. Returns false when
+ * the queue is empty. Items that sat queued long enough for their stream URL
+ * to expire are re-resolved first; items that fail to start are skipped.
+ */
+async function playNextInQueue(session: GuildVoiceSession): Promise<boolean> {
+  const guildId = session.guild.id;
+  const next = session.queue.shift();
+  if (!next) return false;
+
+  // Nothing that happens while we (possibly) re-resolve counts as a drop.
+  session.expectIdle = true;
+
+  let track = next.track;
+  if (Date.now() - next.resolvedAt > QUEUE_STALE_MS) {
+    console.log(`[${guildId}] Queued track "${track.title}" is stale — re-resolving`);
+    const resolved = await resolveYouTube(track.webUrl ?? track.title);
+    // The session may have been stopped or replaced while yt-dlp ran.
+    if (sessions.get(guildId) !== session) return true;
+    if (!resolved.success) {
+      notify(session, `⚠️ Skipping queued track **${track.title}** — it could not be resolved again (${resolved.error})`);
+      return playNextInQueue(session);
+    }
+    track = resolved.track;
+  }
+
+  session.source = { kind: 'youtube', track };
+  session.startedAt = Date.now();
+  session.restartAttempts = 0;
+  session.lastStderr = '';
+  try {
+    session.player.play(createStreamResource(session));
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    console.error(`[${guildId}] Queued track "${track.title}" failed to start: ${error.message}`);
+    notify(session, `⚠️ Skipping queued track **${track.title}** — it failed to start.`);
+    return playNextInQueue(session);
+  }
+  // From here on, an Idle player means the NEW resource ended (or failed),
+  // which must advance the queue again rather than be swallowed.
+  session.expectIdle = false;
+
+  const rest = session.queue.length;
+  notify(
+    session,
+    `▶ Now playing (queue): **${track.title}** — requested by ${next.requestedBy}` +
+      (rest > 0 ? ` · ${rest} more queued` : '')
+  );
+  return true;
+}
+
+/** Advance the queue; when it is (or drains) empty, announce and disconnect. */
+async function advanceQueueOrLeave(session: GuildVoiceSession, reason: string): Promise<void> {
+  const guildId = session.guild.id;
+  const advanced = await playNextInQueue(session);
+  if (advanced || sessions.get(guildId) !== session) return;
+  notify(session, `${reason} The queue is empty — leaving the voice channel. Use \`!play\` or \`!yt\` to start something new.`);
+  stopAndLeave(guildId);
+}
+
+/** Add a resolved track to the guild's queue. Returns its 1-based position,
+ * 'full' when the queue is at capacity, or null when nothing is playing. */
+export function enqueueTrack(guildId: string, item: QueueItem): number | 'full' | null {
+  const session = sessions.get(guildId);
+  if (!session) return null;
+  if (session.queue.length >= QUEUE_MAX) return 'full';
+  session.queue.push(item);
+  return session.queue.length;
+}
+
+export function clearQueue(guildId: string): number {
+  const session = sessions.get(guildId);
+  if (!session) return 0;
+  return session.queue.splice(0).length;
+}
+
+/** Remove and return the queued track at 1-based position n. */
+export function removeFromQueue(guildId: string, n: number): QueueItem | null {
+  const session = sessions.get(guildId);
+  if (!session || n < 1) return null;
+  return session.queue.splice(n - 1, 1)[0] ?? null;
+}
+
+/**
+ * Manually jump to the next queued track. With an empty queue this ends
+ * playback entirely (same as the track finishing naturally). Returns what was
+ * skipped and how many tracks remained, or null when no YouTube source plays.
+ */
+export function skipToNext(guildId: string): { skipped: string; remaining: number } | null {
+  const session = sessions.get(guildId);
+  if (!session || session.source.kind !== 'youtube') return null;
+  const skipped = sourceName(session.source);
+  const remaining = session.queue.length;
+  if (remaining === 0) {
+    stopAndLeave(guildId);
+    return { skipped, remaining };
+  }
+  session.expectIdle = true;
+  session.player.stop();
+  void advanceQueueOrLeave(session, `**${skipped}** was skipped.`);
+  return { skipped, remaining };
 }
 
 export function getConnection(guildId: string): VoiceConnection | null {
@@ -314,6 +437,9 @@ export async function joinVoiceAndPlay(
   if (existing) {
     recordSessionStats(existing);
     clearSessionTimers(existing);
+    if (existing.queue.length > 0) {
+      notify(existing, `🗑 Cleared ${existing.queue.length} queued track${existing.queue.length === 1 ? '' : 's'} — playback was replaced.`);
+    }
     existing.expectIdle = true;
     existing.player.stop();
     existing.connection.destroy();
@@ -367,6 +493,7 @@ export async function joinVoiceAndPlay(
     connection,
     player,
     source,
+    queue: [],
     guild,
     channelId: voiceChannel.id,
     notifyChannelId,

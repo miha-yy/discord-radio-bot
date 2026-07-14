@@ -79,7 +79,8 @@ client.once('clientReady', async () => {
     const stations = await loadStations();
     console.log(`Logged in as ${client.user.tag}`);
     console.log(`Loaded ${stations.length} stations from stations.txt`);
-    console.log('Text commands: !help | !stations | !play | !stop | !np | !search | !radio | !yt | !fav | !volume | !sleep | !dj | !247 | !top');
+    console.log('Text commands: !help | !stations | !play | !stop | !np | !search | !radio | !yt | !queue | !skip | !fav | !volume | !sleep | !dj | !247 | !top');
+    console.log('Fun commands: !whois | !ship | !rate | !8ball | !choose | !roll | !flip');
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err));
     console.error('Failed to load stations:', error.message);
